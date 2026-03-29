@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    MessageHandler,
+    filters,
+)
 
 from config import load_bot_config, load_env
+from confirmations import clear_confirmation, create_confirmation, get_confirmation
 from formatters.help_formatter import format_help
 from formatters.status_formatter import format_host_status
 from logging_setup import get_logger, log_action, setup_logging
 from services.host_service import get_host_status
+from services.studexhub_service import restart_studexhub
 
 
 setup_logging()
@@ -104,6 +112,128 @@ async def host_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text("Failed to fetch host status.")
 
 
+async def studexhub_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+
+    if user is None or not is_admin(user.id):
+        logger.warning("Unauthorized access attempt on /studexhub_restart")
+        if update.message:
+            await update.message.reply_text("Unauthorized.")
+        return
+
+    create_confirmation(user.id, "studexhub_restart")
+
+    logger.info(
+        "/studexhub_restart requested by user_id=%s username=%s",
+        user.id,
+        user.username,
+    )
+    log_action(
+        user_id=user.id,
+        username=user.username,
+        action="studexhub_restart",
+        status="pending",
+    )
+
+    if update.message:
+        await update.message.reply_text(
+            "⚠️ Confirm StudexHub restart.\nReply EXACTLY YES within 180 seconds."
+        )
+
+
+async def handle_confirmation(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+) -> None:
+    user = update.effective_user
+    message = update.message
+
+    if user is None or message is None:
+        return
+
+    if not is_admin(user.id):
+        logger.warning(
+            "Unauthorized text message attempt from user_id=%s username=%s",
+            user.id,
+            user.username,
+        )
+        await message.reply_text("Unauthorized.")
+        return
+
+    text = message.text
+
+    if text not in {"YES", "NO"}:
+        await message.reply_text("Reply EXACTLY YES or NO (case-sensitive).")
+        return
+
+    confirmation = get_confirmation(user.id)
+
+    if not confirmation:
+        await message.reply_text("No pending action.")
+        return
+
+    if text == "NO":
+        clear_confirmation(user.id)
+
+        logger.info(
+            "Action cancelled: %s by user_id=%s username=%s",
+            confirmation.action,
+            user.id,
+            user.username,
+        )
+        log_action(
+            user_id=user.id,
+            username=user.username,
+            action=confirmation.action,
+            status="cancelled",
+        )
+
+        await message.reply_text("Action cancelled.")
+        return
+
+    if text == "YES":
+        clear_confirmation(user.id)
+
+        logger.info(
+            "Action confirmed: %s by user_id=%s username=%s",
+            confirmation.action,
+            user.id,
+            user.username,
+        )
+        log_action(
+            user_id=user.id,
+            username=user.username,
+            action=confirmation.action,
+            status="confirmed",
+        )
+
+        if confirmation.action == "studexhub_restart":
+            await message.reply_text("Restarting StudexHub...")
+
+            success, output = restart_studexhub()
+
+            if success:
+                logger.info("StudexHub restart succeeded")
+                log_action(
+                    user_id=user.id,
+                    username=user.username,
+                    action="studexhub_restart",
+                    status="success",
+                )
+                await message.reply_text("✅ StudexHub restarted successfully.")
+            else:
+                logger.error("StudexHub restart failed: %s", output)
+                log_action(
+                    user_id=user.id,
+                    username=user.username,
+                    action="studexhub_restart",
+                    status="failed",
+                )
+                await message.reply_text("❌ StudexHub restart failed.\nCheck logs.")
+            return
+
+        await message.reply_text(f"Confirmed: {confirmation.action}")
+
+
 def main() -> None:
     logger.info("Starting bot: %s", bot_config["bot"]["name"])
 
@@ -112,6 +242,8 @@ def main() -> None:
     app.add_handler(CommandHandler("ping", ping))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("host_status", host_status))
+    app.add_handler(CommandHandler("studexhub_restart", studexhub_restart))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_confirmation))
 
     app.run_polling()
 
