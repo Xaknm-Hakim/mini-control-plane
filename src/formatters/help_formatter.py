@@ -8,4 +8,6 @@ def format_help() -> str:
         "/ping - Check if the bot is alive\n"
         "/help - Show this help message\n"
         "/host_status - Show host system status\n"
+        "/studexhub_restart - Safely restart StudexHub with confirmation\n"
+        "/studexhub_backup - Create a timestamped StudexHub database backup\n"
     )

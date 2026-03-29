@@ -15,7 +15,7 @@ from formatters.help_formatter import format_help
 from formatters.status_formatter import format_host_status
 from logging_setup import get_logger, log_action, setup_logging
 from services.host_service import get_host_status
-from services.studexhub_service import restart_studexhub
+from services.studexhub_service import backup_studexhub, restart_studexhub
 
 
 setup_logging()
@@ -141,6 +141,54 @@ async def studexhub_restart(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
 
 
+async def studexhub_backup(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+
+    if user is None or not is_admin(user.id):
+        logger.warning("Unauthorized access attempt on /studexhub_backup")
+        if update.message:
+            await update.message.reply_text("Unauthorized.")
+        return
+
+    logger.info(
+        "/studexhub_backup requested by user_id=%s username=%s",
+        user.id,
+        user.username,
+    )
+    log_action(
+        user_id=user.id,
+        username=user.username,
+        action="studexhub_backup",
+        status="started",
+    )
+
+    if update.message:
+        await update.message.reply_text("Creating StudexHub backup...")
+
+    success, output = backup_studexhub()
+
+    if success:
+        logger.info("StudexHub backup succeeded: %s", output)
+        log_action(
+            user_id=user.id,
+            username=user.username,
+            action="studexhub_backup",
+            status="success",
+        )
+        if update.message:
+            await update.message.reply_text(f"✅ {output}")
+    else:
+        logger.error("StudexHub backup failed: %s", output)
+        log_action(
+            user_id=user.id,
+            username=user.username,
+            action="studexhub_backup",
+            status="failed",
+        )
+        if update.message:
+            await update.message.reply_text("❌ StudexHub backup failed.\nCheck logs.")
+
+
 async def handle_confirmation(
     update: Update, context: ContextTypes.DEFAULT_TYPE
 ) -> None:
@@ -243,6 +291,7 @@ def main() -> None:
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("host_status", host_status))
     app.add_handler(CommandHandler("studexhub_restart", studexhub_restart))
+    app.add_handler(CommandHandler("studexhub_backup", studexhub_backup))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_confirmation))
 
     app.run_polling()
