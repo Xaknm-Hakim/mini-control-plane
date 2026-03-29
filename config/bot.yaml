@@ -1,0 +1,3 @@
+bot:
+  name: "mini-control-plane"
+  log_level: "INFO"
