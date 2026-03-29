@@ -4,16 +4,22 @@ from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
 from config import load_bot_config, load_env
+from formatters.status_formatter import format_host_status
+from services.host_service import get_host_status
 
 
 env = load_env()
 bot_config = load_bot_config()
 
 
+def is_admin(user_id: int) -> bool:
+    return user_id == env["admin_id"]
+
+
 async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
 
-    if user is None or user.id != env["admin_id"]:
+    if user is None or not is_admin(user.id):
         if update.message:
             await update.message.reply_text("Unauthorized.")
         return
@@ -22,9 +28,26 @@ async def ping(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text("pong")
 
 
+async def host_status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+
+    if user is None or not is_admin(user.id):
+        if update.message:
+            await update.message.reply_text("Unauthorized.")
+        return
+
+    status = get_host_status()
+    message = format_host_status(status)
+
+    if update.message:
+        await update.message.reply_text(message)
+
+
 def main() -> None:
     app = ApplicationBuilder().token(env["token"]).build()
+
     app.add_handler(CommandHandler("ping", ping))
+    app.add_handler(CommandHandler("host_status", host_status))
 
     print(f"{bot_config['bot']['name']} is running...")
     app.run_polling()
